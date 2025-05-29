@@ -23,3 +23,4 @@ requests
 wheel
 termcolor
 PyQt6
+pyinstaller
