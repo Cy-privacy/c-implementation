@@ -24,3 +24,10 @@ wheel
 termcolor
 PyQt6
 pyinstaller
+psutil
+keyboard
+mouse
+colorama
+pyautogui
+win32gui
+ctypes-callable
