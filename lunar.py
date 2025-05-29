@@ -1,14 +1,75 @@
 import sys
 import os
 import json
+import subprocess
+import platform
+import torch
+import pkg_resources
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel, 
                             QVBoxLayout, QWidget, QProgressBar, QMessageBox,
-                            QDoubleSpinBox, QDialog)
+                            QDoubleSpinBox, QDialog, QWizard, QWizardPage,
+                            QTextBrowser)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
-import subprocess
-import pkg_resources
-import platform
+
+class CUDASetupWizard(QWizard):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("CUDA Setup Wizard")
+        self.setFixedWidth(600)
+        
+        # Add pages
+        self.addPage(self.createIntroPage())
+        self.addPage(self.createCUDAPage())
+        self.addPage(self.createPyTorchPage())
+        
+    def createIntroPage(self):
+        page = QWizardPage()
+        page.setTitle("Welcome to Lunar Vision Setup")
+        
+        layout = QVBoxLayout()
+        label = QLabel(
+            "This wizard will help you set up CUDA and PyTorch correctly.\n\n"
+            "Requirements:\n"
+            "- NVIDIA Graphics Card\n"
+            "- Windows 10/11 64-bit"
+        )
+        layout.addWidget(label)
+        page.setLayout(layout)
+        return page
+        
+    def createCUDAPage(self):
+        page = QWizardPage()
+        page.setTitle("CUDA Installation")
+        
+        layout = QVBoxLayout()
+        text = QTextBrowser()
+        text.setOpenExternalLinks(True)
+        text.setHtml(
+            "1. Download CUDA Toolkit 12.6 from: "
+            "<a href='https://developer.nvidia.com/cuda-12-6-0-download-archive'>"
+            "NVIDIA CUDA 12.6</a><br><br>"
+            "2. Run the installer and follow the instructions<br><br>"
+            "3. Restart your computer after installation"
+        )
+        layout.addWidget(text)
+        page.setLayout(layout)
+        return page
+        
+    def createPyTorchPage(self):
+        page = QWizardPage()
+        page.setTitle("PyTorch Installation")
+        
+        layout = QVBoxLayout()
+        text = QTextBrowser()
+        text.setHtml(
+            "The program will automatically install the correct PyTorch version for CUDA 12.6.<br><br>"
+            "If you need to install it manually, run this command:<br>"
+            "<code>pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126</code>"
+        )
+        layout.addWidget(text)
+        page.setLayout(layout)
+        return page
 
 class SetupDialog(QDialog):
     def __init__(self, parent=None):
@@ -72,7 +133,15 @@ class DependencyInstaller(QThread):
 
     def run(self):
         try:
-            # Install requirements
+            self.status.emit("Checking CUDA availability...")
+            if not torch.cuda.is_available():
+                self.status.emit("Installing PyTorch with CUDA support...")
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install",
+                    "torch", "torchvision", "torchaudio",
+                    "--index-url", "https://download.pytorch.org/whl/cu126"
+                ])
+            
             self.status.emit("Installing dependencies...")
             process = subprocess.Popen([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -108,9 +177,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
         
         # Status
-        self.status_label = QLabel("Ready to start")
+        self.status_label = QLabel("Checking system requirements...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
+        
+        # CUDA Status
+        self.cuda_label = QLabel()
+        self.cuda_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.cuda_label)
         
         # Progress Bar
         self.progress = QProgressBar()
@@ -118,6 +192,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress)
         
         # Buttons
+        self.cuda_setup_btn = QPushButton("CUDA Setup Guide")
+        self.cuda_setup_btn.clicked.connect(self.show_cuda_setup)
+        layout.addWidget(self.cuda_setup_btn)
+        
         self.install_btn = QPushButton("Install Dependencies")
         self.install_btn.clicked.connect(self.install_dependencies)
         layout.addWidget(self.install_btn)
@@ -130,9 +208,26 @@ class MainWindow(QMainWindow):
         self.setup_btn.clicked.connect(self.show_setup)
         layout.addWidget(self.setup_btn)
         
-        # Check initial setup
-        self.check_initial_setup()
+        # Check system requirements
+        self.check_system_requirements()
         
+    def check_system_requirements(self):
+        if torch.cuda.is_available():
+            cuda_version = torch.version.cuda
+            self.cuda_label.setText(f"CUDA {cuda_version} detected and working!")
+            self.cuda_label.setStyleSheet("color: green")
+            self.cuda_setup_btn.setVisible(False)
+        else:
+            self.cuda_label.setText("CUDA not available - click 'CUDA Setup Guide'")
+            self.cuda_label.setStyleSheet("color: red")
+            self.cuda_setup_btn.setVisible(True)
+        
+        self.check_initial_setup()
+            
+    def show_cuda_setup(self):
+        wizard = CUDASetupWizard(self)
+        wizard.exec()
+            
     def check_initial_setup(self):
         if not os.path.exists("lib/config/config.json"):
             self.show_setup()
@@ -156,6 +251,7 @@ class MainWindow(QMainWindow):
     def installation_complete(self):
         self.progress.setVisible(False)
         self.install_btn.setEnabled(True)
+        self.check_system_requirements()
         self.status_label.setText("Ready to start!")
         
     def show_error(self, message):
